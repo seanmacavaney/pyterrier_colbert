@@ -304,8 +304,7 @@ class ColBERTIndexer(IterDictIndexerBase):
             import pyterrier as pt
             nonlocal docnos
             nonlocal docid
-            if self.num_docs is not None:
-                iterator = pt.tqdm(iterator, total=self.num_docs, desc="encoding", unit="d")
+            iterator = pt.tqdm(iterator, total=self.num_docs, desc="encoding", unit="d")
             for l in iterator:
                 l["docid"] = docid
                 docnos.append(l['docno'])
