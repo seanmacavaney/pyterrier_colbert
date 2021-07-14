@@ -252,7 +252,7 @@ class CollectionEncoder_Generator(CollectionEncoder):
 
 
 class ColBERTIndexer(IterDictIndexerBase):
-    def __init__(self, checkpoint, index_root, index_name, chunksize, prepend_title=False, num_docs=None, ids=True):
+    def __init__(self, checkpoint, index_root, index_name, chunksize, prepend_title=False, num_docs=None, ids=True, faiss=True):
         args = Object()
         args.similarity = 'cosine'
         args.dim = 128
@@ -279,6 +279,7 @@ class ColBERTIndexer(IterDictIndexerBase):
         self.ids = ids
         self.prepend_title = prepend_title
         self.num_docs = num_docs
+        self.faiss = faiss
 
         assert self.args.slices >= 1
         assert self.args.sample is None or (0.0 < self.args.sample <1.0), self.args.sample
@@ -327,13 +328,14 @@ class ColBERTIndexer(IterDictIndexerBase):
         with pt.io.autoopen(os.path.join(self.args.index_path, "docnos.pkl.gz"), "wb") as f:
             pickle.dump(docnos, f)
 
-        if self.args.partitions is None:
-            self.args.partitions = 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))
-            warn("You did not specify --partitions!")
-            warn("Default computation chooses", self.args.partitions,
-                        "partitions (for {} embeddings)".format(num_embeddings))
-        index_faiss(self.args)
-        print("#> Faiss encoding complete")
+        if self.faiss:
+            if self.args.partitions is None:
+                self.args.partitions = 1 << math.ceil(math.log2(8 * math.sqrt(num_embeddings)))
+                warn("You did not specify --partitions!")
+                warn("Default computation chooses", self.args.partitions,
+                            "partitions (for {} embeddings)".format(num_embeddings))
+            index_faiss(self.args)
+            print("#> Faiss encoding complete")
         endtime = timer()
         print("#> Indexing complete, Time elapsed %0.2f seconds" % (endtime - starttime))
         
