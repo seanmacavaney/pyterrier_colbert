@@ -316,7 +316,7 @@ class np_re_ranker_mmap:
             idxs = rng.choice(idxs, size=max_count, replace=False)
             idxs.sort() # faster lookups if in sequence
         if self.verbose:
-            return np.concatenate([self.vecs[idxs[start:start+100]] for start in pd.tqdm(range(0, len(idxs), 100), desc='looking up vectors', unit='chunk')])
+            return np.concatenate([self.vecs[idxs[start:start+100]] for start in pt.tqdm(range(0, len(idxs), 100), desc='looking up vectors', unit='chunk')])
         return self.vecs[idxs]
 
     def vecs_by_tok(self, tok, max_count=None):
@@ -325,13 +325,28 @@ class np_re_ranker_mmap:
         return self.vecs_by_idxs(idxs, max_count=max_count)
 
     def catvecs_by_tok_seq(self, toks, max_count=None):
-        tok_idxs = []
-        for tok in toks:
+        tok_idxs = None
+        for i, tok in enumerate(toks):
             start, stop = self.tok2idxs_offsets[tok:tok+2]
-            tok_idxs.append(self.tok2idxs[start:stop])
-        for i in range(tok_idxs-1):
-            seq_mask = np.isin(tok_idxs[i] + 1, tok_idxs[i+1], assume_unique=True)
-            tok_idxs[i+1] = tok_idxs[i+1][seq_idxs]
+            idxs = self.tok2idxs[start:stop]
+            if i == 0:
+                tok_idxs = idxs
+            else:
+                seq_mask = np.isin(tok_idxs, idxs - i, assume_unique=True)
+                tok_idxs = tok_idxs[seq_mask]
+        if max_count and len(tok_idxs) > max_count:
+            rng = np.random.RandomState(42)
+            tok_idxs = rng.choice(tok_idxs, size=max_count, replace=False)
+            tok_idxs.sort() # faster lookups if in sequence
+        vecs = []
+        for _ in toks:
+            vecs.append(self.vecs_by_idxs(tok_idxs))
+            tok_idxs += 1
+        return vecs.concatenate(vecs, axis=1)
+
+    def vecs_by_text(self, text, max_count=None):
+        toks = self.inference.query_tokenizer.encode([text])[0]
+        return self.catvecs_by_tok_seq(toks, max_count)
 
 
 class ColBERTFactory():
