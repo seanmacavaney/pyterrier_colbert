@@ -202,6 +202,129 @@ class re_ranker_mmap:
             allscores.extend(batch_scores)
         return allscores
 
+
+class np_re_ranker_mmap:
+    def __init__(self, index_path, args, inference, verbose = False):
+        self.args = args
+        self.doc_maxlen = args.doc_maxlen
+        assert self.doc_maxlen > 0
+        self.inference = inference
+        self.dim = 128 #TODO
+        self.verbose = verbose
+    
+        # Every pt file gets its own list of doc lengths
+        self.doc_offsets = np.memmap(os.path.join(index_path, 'doclens.psum.np'), dtype=np.uint64, mode='r')
+        vecs_path = os.path.join(index_path, 'vecs.np')
+        vec_count = os.path.getsize(vecs_path) // 2 // self.dim # 2 for float16
+        self.vecs = np.memmap(vecs_path, dtype=np.float16, mode='r', shape=(vec_count, self.dim))
+        self.tok2idxs = np.memmap(os.path.join(index_path, 'tok2idxs.data.np'), mode='r', dtype=np.uint64)
+        self.tok2idxs_offsets = np.memmap(os.path.join(index_path, 'tok2idxs.psum.np'), mode='r', dtype=np.uint64)
+
+    def get_embedding(self, pid):
+        return self.get_embedding_copy(pid, torch.zeros(1, self.doc_maxlen, self.dim), 0)[0]
+    
+    def get_embedding_copy(self, pid, target, index):
+        start, stop = self.doc_offsets[pid:pid+2]
+        disk_tensor = self.vecs[start:stop]
+        doclen = disk_tensor.shape[0]
+         # only here is there a memory copy from the memory mapped file 
+        target[index, :doclen, :] = torch.from_numpy(disk_tensor)
+        return target
+    
+    def our_rerank(self, query, pids, gpu=True):
+        colbert = self.args.colbert
+        inference = self.inference
+
+        Q = inference.queryFromText([query])
+        if self.verbose:
+            pid_iter = tqdm(pids, desc="lookups", unit="d")
+        else:
+            pid_iter = pids
+
+        # TODO: I bet scoring could be much faster if we avoid moving from numpy to torch.
+        # We'd be able to:
+        #   - re-use allocated memory for each document, rather than allocating enough space for
+        #     each document (or potentially always rely directly on the mmap)
+        # On the other hand:
+        #   - we'd be giving up GPU acceleration
+        #   - we'd need to re-create the scoring function in numpy (though it's not complicated)
+        # For now, just keeping it as it was in the original implementation
+        D_ = torch.zeros(len(pids), self.doc_maxlen, self.dim)
+        for offset, pid in enumerate(pid_iter):
+            self.get_embedding_copy(pid, D_, offset)
+
+        if gpu:
+            D_ = D_.cuda()
+
+        scores = colbert.score(Q, D_).cpu()
+        del(D_)
+        return scores.tolist()
+
+    def our_rerank_batched(self, query, pids, gpu=True, batch_size=1000):
+        import more_itertools
+        if len(pids) < batch_size:
+            return self.our_rerank(query, pids, gpu=gpu)
+        allscores=[]
+        for group in more_itertools.chunked(pids, batch_size):
+            batch_scores = self.our_rerank(query, group, gpu)
+            allscores.extend(batch_scores)
+        return allscores
+
+    def our_rerank_with_embeddings(self, qembs, pids, weightsQ=None, gpu=True):
+        """
+        input: qid,query, docid, query_tokens, query_embeddings, query_weights 
+        
+        output: qid, query, docid, score
+        """
+        colbert = self.args.colbert
+        inference = self.inference
+        # default is uniform weight for all query embeddings
+        if weightsQ is None:
+            weightsQ = torch.ones(len(qembs))
+        # make to 3d tensor
+        Q = torch.unsqueeze(qembs, 0)
+        if gpu:
+            Q = Q.cuda()
+        
+        if self.verbose:
+            pid_iter = tqdm(pids, desc="lookups", unit="d")
+        else:
+            pid_iter = pids
+
+        D_ = torch.zeros(len(pids), self.doc_maxlen, self.dim)
+        for offset, pid in enumerate(pid_iter):
+            self.get_embedding_copy(pid, D_, offset)
+        if gpu:
+            D_ = D_.cuda()
+        maxscoreQ = (Q @ D_.permute(0, 2, 1)).max(2).values.cpu()
+        scores = (weightsQ*maxscoreQ).sum(1).cpu()
+        return scores.tolist()
+
+    def our_rerank_with_embeddings_batched(self, qembs, pids, weightsQ=None, gpu=True, batch_size=1000):
+        import more_itertools
+        if len(pids) < batch_size:
+            return self.our_rerank_with_embeddings(qembs, pids, weightsQ, gpu)
+        allscores=[]
+        for group in more_itertools.chunked(pids, batch_size):
+            batch_scores = self.our_rerank_with_embeddings(qembs, group, weightsQ, gpu)
+            allscores.extend(batch_scores)
+        return allscores
+
+    def vecs_by_idxs(self, idxs, max_count=None):
+        if max_count and len(idxs) > max_count:
+            rng = np.RandomState(42)
+            idxs = rng.choice(idxs, size=max_count)
+            idxs.sort() # faster lookups if in sequence
+        if self.verbose:
+            return np.concat([self.vecs[idxs[start:start+100]] for start in pd.tqdm(range(0, len(idxs), 100), desc='looking up vectors', unit='chunk')])
+        return self.vecs[idxs]
+
+    def vecs_by_tok(self, tok, max_count=None):
+        start, stop = self.tok2idxs_offsets[tok:tok+2]
+        idxs = self.tok2idxs[start:stop]
+        return self.vecs_by_idxs(idxs, max_count=max_count)
+
+
 class ColBERTFactory():
 
     def __init__(self, 
@@ -245,7 +368,7 @@ class ColBERTFactory():
 
         try:
             import faiss
-        except:
+        except: # TODO: shouldn't this be ImportError?
             warn("Faiss not installed. You cannot do retrieval")
         self.faiss_index_on_gpu = True
         if not gpu:
@@ -281,12 +404,19 @@ class ColBERTFactory():
         if self.rrm is not None:
             return self.rrm
         print("Loading reranking index, memtype=%s" % self.memtype)
-        self.rrm = re_ranker_mmap(
-            self.index_path, 
-            self.args, 
-            self.args.inference, 
-            verbose=self.verbose, 
-            memtype=self.memtype)
+        if os.path.exists(os.path.join(self.index_path, 'vecs.np')):
+            self.rrm = np_re_ranker_mmap(
+                self.index_path, 
+                self.args, 
+                self.args.inference, 
+                verbose=self.verbose)
+        else:
+            self.rrm = re_ranker_mmap(
+                self.index_path, 
+                self.args, 
+                self.args.inference, 
+                verbose=self.verbose, 
+                memtype=self.memtype)
         return self.rrm
         
     def nn_term(self, df=False):
