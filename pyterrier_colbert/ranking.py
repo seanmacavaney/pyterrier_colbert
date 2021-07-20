@@ -312,6 +312,8 @@ class np_re_ranker_mmap:
 
     def vecs_by_idxs(self, idxs, max_count=None):
         if max_count and len(idxs) > max_count:
+            if self.verbose:
+                print(f"sampling max_count={max_count} from {len(idxs)} vectors")
             rng = np.random.RandomState(42)
             idxs = rng.choice(idxs, size=max_count, replace=False)
             idxs.sort() # faster lookups if in sequence
@@ -342,7 +344,7 @@ class np_re_ranker_mmap:
         for _ in toks:
             vecs.append(self.vecs_by_idxs(tok_idxs))
             tok_idxs += 1
-        return vecs.concatenate(vecs, axis=1)
+        return np.concatenate(vecs, axis=1)
 
     def vecs_by_text(self, text, max_count=None):
         toks = self.inference.query_tokenizer.encode([text])[0]
