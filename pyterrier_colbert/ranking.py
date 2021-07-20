@@ -343,7 +343,7 @@ class np_re_ranker_mmap:
         vecs = []
         for _ in toks:
             vecs.append(self.vecs_by_idxs(tok_idxs))
-            tok_idxs += 1
+            tok_idxs = tok_idxs + 1
         return np.concatenate(vecs, axis=1)
 
     def vecs_by_text(self, text, max_count=None):
