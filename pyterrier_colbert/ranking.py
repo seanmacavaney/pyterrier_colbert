@@ -948,7 +948,7 @@ class MultiFaissMmapIndex:
         print_message("#> Removing duplicates..", condition=verbose)
         all_pids = np.unique(all_pids)
 
-        print_message(f"#> Converting to a list [shape = {all_pids.size()}]..", condition=verbose)
+        print_message(f"#> Converting to a list [shape = {all_pids.shape}]..", condition=verbose)
         all_pids = all_pids.tolist()
 
         return all_pids
