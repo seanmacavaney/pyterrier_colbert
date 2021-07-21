@@ -921,6 +921,7 @@ class MultiFaissMmapIndex:
 
         embeddings_ids = []
         faiss_bsize = embeddings_per_query * 5000
+        per_index_faiss_depth = faiss_depth // len(self.faiss_indices)
         for offset in range(0, Q_faiss.size(0), faiss_bsize):
             endpos = min(offset + faiss_bsize, Q_faiss.size(0))
 
@@ -928,7 +929,7 @@ class MultiFaissMmapIndex:
 
             some_Q_faiss = Q_faiss[offset:endpos].float().numpy()
             for index, id_offset in zip(self.faiss_indices, self.faiss_indices_offsets):
-                _, some_embedding_ids = self.faiss_index.search(some_Q_faiss, faiss_depth)
+                _, some_embedding_ids = index.search(some_Q_faiss, per_index_faiss_depth)
                 embeddings_ids.append(some_embedding_ids + id_offset)
 
         embedding_ids = np.concatenate(embeddings_ids)
