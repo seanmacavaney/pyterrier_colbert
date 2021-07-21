@@ -943,7 +943,7 @@ class MultiFaissMmapIndex:
     def embedding_ids_to_pids(self, embedding_ids, verbose=True):
         # Find unique PIDs per query.
         print_message("#> Lookup the PIDs..", condition=verbose)
-        all_pids = np.searchsorted(self.doc_offsets, side='right')
+        all_pids = np.searchsorted(self.doc_offsets, embedding_ids, side='right')
 
         print_message("#> Removing duplicates..", condition=verbose)
         all_pids = numpy.unique(all_pids)
