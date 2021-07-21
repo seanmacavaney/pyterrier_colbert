@@ -403,8 +403,8 @@ class ColBERTFactory():
                         # support reverse docno lookup in memory
                         self._docno2docid = { docno : docid for docid, docno in enumerate(self._docid2docno) }
                         self.docid_as_docno = False
-            else:
-                self.docid_as_docno = True
+                else:
+                    self.docid_as_docno = True
 
         try:
             import faiss
