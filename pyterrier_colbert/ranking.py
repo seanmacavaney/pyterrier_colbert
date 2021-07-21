@@ -944,12 +944,11 @@ class MultiFaissMmapIndex:
         # Find unique PIDs per query.
         print_message("#> Lookup the PIDs..", condition=verbose)
         all_pids = np.searchsorted(self.doc_offsets, embedding_ids, side='right')
-        import pdb; pdb.set_trace()
-
-        print_message("#> Removing duplicates..", condition=verbose)
-        all_pids = np.unique(all_pids)
 
         print_message(f"#> Converting to a list [shape = {all_pids.shape}]..", condition=verbose)
         all_pids = all_pids.tolist()
+
+        print_message("#> Removing duplicates..", condition=verbose)
+        all_pids = [list(set(pid)) for pid in pids for pids in all_pids]
 
         return all_pids
