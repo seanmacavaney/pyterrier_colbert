@@ -928,7 +928,8 @@ class MultiFaissMmapIndex:
             print_message("#> Searching from {} to {}...".format(offset, endpos), condition=verbose)
 
             some_Q_faiss = Q_faiss[offset:endpos].float().numpy()
-            for index, id_offset in zip(self.faiss_indices, self.faiss_indices_offsets):
+            for i, (index, id_offset) in enumerate(zip(self.faiss_indices, self.faiss_indices_offsets)):
+                print_message(f"#> Searching index {i}...", condition=verbose)
                 _, some_embedding_ids = index.search(some_Q_faiss, per_index_faiss_depth)
                 embeddings_ids.append(some_embedding_ids + id_offset)
 
