@@ -933,12 +933,12 @@ class MultiFaissMmapIndex:
                 _, some_embedding_ids = index.search(some_Q_faiss, per_index_faiss_depth)
                 embeddings_ids.append(some_embedding_ids + id_offset)
 
-        embedding_ids = np.concatenate(embeddings_ids)
+        embeddings_ids = np.concatenate(embeddings_ids)
 
         # Reshape to (number of queries, non-unique embedding IDs per query)
-        embedding_ids = embedding_ids.reshape(num_queries, embeddings_per_query * embedding_ids.shape[1])
+        embeddings_ids = embeddings_ids.reshape(num_queries, -1)
 
-        return embedding_ids
+        return embeddings_ids
 
     def embedding_ids_to_pids(self, embedding_ids, verbose=True):
         # Find unique PIDs per query.
