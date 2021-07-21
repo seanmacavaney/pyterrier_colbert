@@ -1,4 +1,5 @@
-
+import faiss
+from colbert.utils.utils import print_message
 import os
 import torch
 import pandas as pd
@@ -488,15 +489,18 @@ class ColBERTFactory():
         from colbert.ranking.faiss_index import FaissIndex
         if self.faiss_index is not None:
             return self.faiss_index
-        faiss_index_path = get_faiss_index_name(self.args)
-        faiss_index_path = os.path.join(self.index_path, faiss_index_path)
-        if not os.path.exists(faiss_index_path):
-            raise ValueError("No faiss index found at %s" % faiss_index_path)
-        self.faiss_index = FaissIndex(self.index_path, faiss_index_path, self.args.nprobe, self.args.part_range)
-        # ensure the faiss_index is transferred to GPU memory for speed
-        import faiss
-        if self.faiss_index_on_gpu:
-            self.faiss_index.faiss_index = faiss.index_cpu_to_all_gpus(self.faiss_index.faiss_index)
+        if os.path.exists(f'{self.index_path}/0.faiss'):
+            self.faiss_index = MultiFaissMmapIndex(self.index_path, self.args.nprobe)
+        else:
+            faiss_index_path = get_faiss_index_name(self.args)
+            faiss_index_path = os.path.join(self.index_path, faiss_index_path)
+            if not os.path.exists(faiss_index_path):
+                raise ValueError("No faiss index found at %s" % faiss_index_path)
+            self.faiss_index = FaissIndex(self.index_path, faiss_index_path, self.args.nprobe, self.args.part_range)
+            # ensure the faiss_index is transferred to GPU memory for speed
+            import faiss
+            if self.faiss_index_on_gpu:
+                self.faiss_index.faiss_index = faiss.index_cpu_to_all_gpus(self.faiss_index.faiss_index)
         return self.faiss_index
 
     def set_retrieve(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, docnos=False) -> TransformerBase:
@@ -878,3 +882,70 @@ class ColbertPRF(TransformerBase):
                 new_query_df = new_query_df.rename(columns={'docno_x':'docno'})
             rtr.append(new_query_df)
         return pd.concat(rtr)
+
+
+class MultiFaissMmapIndex:
+    """
+    This is a replacement for colbert's FaissIndex that:
+     - Supports multiple index files
+     - Reads them as mmap'd files, rather than loading them all into memory
+    which are useful when the index would be too large to fit into memory as a single index.
+    """
+    def __init__(self, base_path, nprobe):
+        print_message("#> Loading the FAISS index from", faiss_index_path, "..")
+
+        self.faiss_indices = []
+        self.faiss_indices_offsets = [0]
+        for faiss_index_path in sorted(glob(f'{base_path}/*.faiss'), key=lambda x: int(x.split('/')[-1].split('.')[0])):
+            index = faiss.read_index(faiss_index_path, faiss.IO_FLAG_MMAP)
+            index.nprobe = nprobe
+            self.faiss_indices.append(index)
+            self.faiss_indices_offsets.append(self.faiss_indices_offsets[-1] + index.ntotal)
+
+        self.doc_offsets = np.memmap(f'{base_path}/doclens.psum.np', dtype=np.uint64, mode='r')
+
+    def retrieve(self, faiss_depth, Q, verbose=False):
+        embedding_ids = self.queries_to_embedding_ids(faiss_depth, Q, verbose=verbose)
+        return self.embedding_ids_to_pids(embedding_ids, verbose=verbose)
+
+    def queries_to_embedding_ids(self, faiss_depth, Q, verbose=True):
+        # Flatten into a matrix for the faiss search.
+        num_queries, embeddings_per_query, dim = Q.size()
+        Q_faiss = Q.view(num_queries * embeddings_per_query, dim).cpu().contiguous()
+
+        # Search in large batches with faiss.
+        print_message("#> Search in batches with faiss. \t\t",
+                      f"Q.size() = {Q.size()}, Q_faiss.size() = {Q_faiss.size()}",
+                      condition=verbose)
+
+        embeddings_ids = []
+        faiss_bsize = embeddings_per_query * 5000
+        for offset in range(0, Q_faiss.size(0), faiss_bsize):
+            endpos = min(offset + faiss_bsize, Q_faiss.size(0))
+
+            print_message("#> Searching from {} to {}...".format(offset, endpos), condition=verbose)
+
+            some_Q_faiss = Q_faiss[offset:endpos].float().numpy()
+            for index, id_offset in zip(self.faiss_indices, self.faiss_indices_offsets):
+                _, some_embedding_ids = self.faiss_index.search(some_Q_faiss, faiss_depth)
+                embeddings_ids.append(some_embedding_ids + id_offset)
+
+        embedding_ids = np.concatenate(embeddings_ids)
+
+        # Reshape to (number of queries, non-unique embedding IDs per query)
+        embedding_ids = embedding_ids.reshape(num_queries, embeddings_per_query * embedding_ids.size(1))
+
+        return embedding_ids
+
+    def embedding_ids_to_pids(self, embedding_ids, verbose=True):
+        # Find unique PIDs per query.
+        print_message("#> Lookup the PIDs..", condition=verbose)
+        all_pids = np.searchsorted(self.doc_offsets, side='right')
+
+        print_message("#> Removing duplicates..", condition=verbose)
+        all_pids = numpy.unique(all_pids)
+
+        print_message(f"#> Converting to a list [shape = {all_pids.size()}]..", condition=verbose)
+        all_pids = all_pids.tolist()
+
+        return all_pids
