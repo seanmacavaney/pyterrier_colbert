@@ -978,6 +978,6 @@ class MultiFaissMmapIndex:
         all_pids = all_pids.tolist()
 
         print_message("#> Removing duplicates..", condition=verbose)
-        all_pids = [list(set(pid)) for pids in all_pids for pid in pids]
+        all_pids = [list(set(pids)) for pids in all_pids]
 
         return all_pids
