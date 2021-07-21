@@ -384,13 +384,25 @@ class ColBERTFactory():
             warn("No index_root and index_name specified - no index ranking possible")
         else:
             self.index_path = os.path.join(index_root, index_name)
-            docnos_file = os.path.join(self.index_path, "docnos.pkl.gz")
-            if os.path.exists(docnos_file):
-                with pt.io.autoopen(docnos_file, "rb") as f:
-                    self.docid2docno = pickle.load(f)
-                    # support reverse docno lookup in memory
-                    self.docno2docid = { docno : docid for docid, docno in enumerate(self.docid2docno) }
-                    self.docid_as_docno = False
+            if os.path.exists(os.path.join(self.index_path, "docnos.np")):
+                with open(os.path.join(self.index_path, "docnos.np.meta"), 'rt') as f:
+                    meta = f.read().strip().split()
+                    if len(meta) == 2:
+                        l, self._docno_prefix = int(meta[0]), meta[1]
+                    else:
+                        l, self._docno_prefix = int(meta[0]), ''
+                self._docno_mmap = np.memmap(os.path.join(self.index_path, "docnos.np"), mode='r', dtype=f'S{l}')
+                self._docno_sorted_mmap = np.memmap(os.path.join(self.index_path, "docnos.np.sorted"), mode='r', dtype=f'S{l}')
+                self._docno_sorted_idxs_mmap = np.memmap(os.path.join(self.index_path, "docnos.np.sorted.idxs"), mode='r', dtype=np.uint64)
+                self.docid_as_docno = False
+            else:
+                docnos_file = os.path.join(self.index_path, "docnos.pkl.gz")
+                if os.path.exists(docnos_file):
+                    with pt.io.autoopen(docnos_file, "rb") as f:
+                        self._docid2docno = pickle.load(f)
+                        # support reverse docno lookup in memory
+                        self._docno2docid = { docno : docid for docid, docno in enumerate(self._docid2docno) }
+                        self.docid_as_docno = False
             else:
                 self.docid_as_docno = True
 
@@ -600,15 +612,32 @@ class ColBERTFactory():
         if self.docid_as_docno:
             df["docid"] = df["docno"].astype('int64')
         else:
-            df["docid"] = df["docno"].apply(lambda docno : self.docno2docid[docno])
+            df["docid"] = df["docno"].apply(lambda docno : self.docno2docid(docno))
         return df
 
     def _add_docnos(self, df):
         if self.docid_as_docno:
             df["docno"] = df["docid"].astype('str')
         else:
-            df["docno"] = df["docid"].apply(lambda docid : self.docid2docno[docid])
+            df["docno"] = df["docid"].apply(lambda docid : self.docid2docno(docid))
         return df
+
+    def docid2docno(self, docid):
+        if self._docno_mmap is not None:
+            res = self._docno_mmap[docid]
+            return self._docno_prefix + res.decode()
+        else:
+            return self._docid2docno[docid]
+
+    def docno2docid(self, docno):
+        if self._docno_sorted_mmap is not None:
+            assert docno.startswith(self._docno_prefix)
+            docno_bytes = docno[len(self._docno_prefix):].encode()
+            sorted_idx = np.searchsorted(self._docno_sorted_mmap, docno_bytes, side='left')
+            assert self._docno_sorted_mmap[sorted_idx] == docno_bytes
+            return self._docno_sorted_idxs_mmap[sorted_idx]
+        else:
+            return self._docid2docno[docid]
 
     def index_scorer(self, query_encoded=False, add_ranks=False, add_docnos=True, batch_size=10000) -> TransformerBase:
         """
@@ -712,7 +741,7 @@ class ColBERTFactory():
         Provides a diagram explaining the interaction between a query and a given docno
         """
         if isinstance(doc,str):
-            pid = self.docno2docid[doc]
+            pid = self.docno2docid(doc)
         elif isinstance(doc,int):
             pid = doc
         else:
@@ -949,6 +978,6 @@ class MultiFaissMmapIndex:
         all_pids = all_pids.tolist()
 
         print_message("#> Removing duplicates..", condition=verbose)
-        all_pids = [list(set(pid)) for pid in pids for pids in all_pids]
+        all_pids = [list(set(pid)) for pids in all_pids for pid in pids]
 
         return all_pids
