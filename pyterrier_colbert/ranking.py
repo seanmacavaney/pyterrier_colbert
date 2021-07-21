@@ -946,7 +946,7 @@ class MultiFaissMmapIndex:
         all_pids = np.searchsorted(self.doc_offsets, embedding_ids, side='right')
 
         print_message("#> Removing duplicates..", condition=verbose)
-        all_pids = numpy.unique(all_pids)
+        all_pids = np.unique(all_pids)
 
         print_message(f"#> Converting to a list [shape = {all_pids.size()}]..", condition=verbose)
         all_pids = all_pids.tolist()
