@@ -935,7 +935,7 @@ class MultiFaissMmapIndex:
         embedding_ids = np.concatenate(embeddings_ids)
 
         # Reshape to (number of queries, non-unique embedding IDs per query)
-        embedding_ids = embedding_ids.reshape(num_queries, embeddings_per_query * embedding_ids.size(1))
+        embedding_ids = embedding_ids.reshape(num_queries, embeddings_per_query * embedding_ids.shape[1])
 
         return embedding_ids
 
