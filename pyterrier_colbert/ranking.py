@@ -892,7 +892,7 @@ class MultiFaissMmapIndex:
     which are useful when the index would be too large to fit into memory as a single index.
     """
     def __init__(self, base_path, nprobe):
-        print_message("#> Loading the FAISS index from", faiss_index_path, "..")
+        print_message("#> Loading the FAISS indexes from", base_path, "..")
 
         self.faiss_indices = []
         self.faiss_indices_offsets = [0]
