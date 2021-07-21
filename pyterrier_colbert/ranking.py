@@ -1,3 +1,4 @@
+from glob import glob
 import faiss
 from colbert.utils.utils import print_message
 import os
