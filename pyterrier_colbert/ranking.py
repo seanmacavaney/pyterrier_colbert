@@ -328,7 +328,7 @@ class np_re_ranker_mmap:
         idxs = self.tok2idxs[start:stop]
         return self.vecs_by_idxs(idxs, max_count=max_count)
 
-    def catvecs_by_tok_seq(self, toks, max_count=None):
+    def catvecs_by_tok_seq(self, toks, max_count=None, return_idxs=False):
         tok_idxs = None
         for i, tok in enumerate(toks):
             start, stop = self.tok2idxs_offsets[tok:tok+2]
@@ -343,14 +343,18 @@ class np_re_ranker_mmap:
             tok_idxs = rng.choice(tok_idxs, size=max_count, replace=False)
             tok_idxs.sort() # faster lookups if in sequence
         vecs = []
+        orig_tok_idxs = tok_idxs
         for _ in toks:
             vecs.append(self.vecs_by_idxs(tok_idxs))
             tok_idxs = tok_idxs + 1
-        return np.concatenate(vecs, axis=1)
+        vecs = np.concatenate(vecs, axis=1)
+        if return_idxs:
+            return vecs, tok_idxs
+        return vecs
 
-    def vecs_by_text(self, text, max_count=None):
+    def vecs_by_text(self, text, max_count=None, return_idxs=False):
         toks = self.inference.query_tokenizer.encode([text])[0]
-        return self.catvecs_by_tok_seq(toks, max_count)
+        return self.catvecs_by_tok_seq(toks, max_count, return_idxs=return_idxs)
 
 
 class ColBERTFactory():
