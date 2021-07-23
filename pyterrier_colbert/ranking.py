@@ -645,7 +645,7 @@ class ColBERTFactory():
             assert docno.startswith(self._docno_prefix)
             docno_bytes = docno[len(self._docno_prefix):].encode()
             sorted_idx = np.searchsorted(self._docno_sorted_mmap, docno_bytes, side='left')
-            if sorted_idx > self._docno_sorted_mmap.shape[0] or self._docno_sorted_mmap[sorted_idx] != docno_bytes:
+            if sorted_idx < self._docno_sorted_mmap.shape[0] or self._docno_sorted_mmap[sorted_idx] != docno_bytes:
                 print(f'cannot find docno {docno}')
                 return None
             return self._docno_sorted_idxs_mmap[sorted_idx]
