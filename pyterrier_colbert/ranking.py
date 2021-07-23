@@ -342,9 +342,9 @@ class np_re_ranker_mmap:
             rng = np.random.RandomState(42)
             rand_idxs = rng.choice(tok_idxs, size=max_count, replace=False)
             if ensure_ranges:
-                conditions = (tok_idxs >= ensure_ranges[0][0] & tok_idxs < ensure_ranges[0][1])
+                conditions = ((tok_idxs >= ensure_ranges[0][0]) & (tok_idxs < ensure_ranges[0][1]))
                 for start, stop in ensure_ranges[1:]:
-                    conditions = conditions | (tok_idxs >= start & tok_idxs < stop)
+                    conditions = conditions | ((tok_idxs >= start) & (tok_idxs < stop))
                 tok_idxs = np.concatenate([rand_idxs, tok_idxs[conditions]])
             else:
                 tok_idxs = tok_idxs
