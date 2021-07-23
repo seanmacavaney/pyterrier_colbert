@@ -328,7 +328,7 @@ class np_re_ranker_mmap:
         idxs = self.tok2idxs[start:stop]
         return self.vecs_by_idxs(idxs, max_count=max_count)
 
-    def catvecs_by_tok_seq(self, toks, max_count=None, return_idxs=False):
+    def catvecs_by_tok_seq(self, toks, max_count=None, return_idxs=False, ensure_ranges=None):
         tok_idxs = None
         for i, tok in enumerate(toks):
             start, stop = self.tok2idxs_offsets[tok:tok+2]
@@ -340,7 +340,14 @@ class np_re_ranker_mmap:
                 tok_idxs = tok_idxs[seq_mask]
         if max_count and len(tok_idxs) > max_count:
             rng = np.random.RandomState(42)
-            tok_idxs = rng.choice(tok_idxs, size=max_count, replace=False)
+            rand_idxs = rng.choice(tok_idxs, size=max_count, replace=False)
+            if ensure_ranges:
+                conditions = (tok_idxs >= ensure_ranges[0][0] & tok_idxs < ensure_ranges[0][1])
+                for start, stop in ensure_ranges[1:]:
+                    conditions = conditions | (tok_idxs >= start & tok_idxs < stop)
+                tok_idxs = np.concatenate([rand_idxs, tok_idxs[conditions]])
+            else:
+                tok_idxs = tok_idxs
             tok_idxs.sort() # faster lookups if in sequence
         vecs = []
         orig_tok_idxs = tok_idxs
@@ -352,9 +359,9 @@ class np_re_ranker_mmap:
             return vecs, tok_idxs
         return vecs
 
-    def vecs_by_text(self, text, max_count=None, return_idxs=False):
+    def vecs_by_text(self, text, max_count=None, return_idxs=False, ensure_ranges=None):
         toks = self.inference.query_tokenizer.encode([text])[0]
-        return self.catvecs_by_tok_seq(toks, max_count, return_idxs=return_idxs)
+        return self.catvecs_by_tok_seq(toks, max_count, return_idxs=return_idxs, ensure_ranges=ensure_ranges)
 
 
 class ColBERTFactory():
@@ -976,7 +983,7 @@ class MultiFaissMmapIndex:
     def embedding_ids_to_pids(self, embedding_ids, verbose=True):
         # Find unique PIDs per query.
         print_message("#> Lookup the PIDs..", condition=verbose)
-        all_pids = np.searchsorted(self.doc_offsets, embedding_ids, side='right')
+        all_pids = np.searchsorted(self.doc_offsets, embedding_ids, side='right') - 1
 
         print_message(f"#> Converting to a list [shape = {all_pids.shape}]..", condition=verbose)
         all_pids = all_pids.tolist()
