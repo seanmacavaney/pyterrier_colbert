@@ -347,8 +347,8 @@ class np_re_ranker_mmap:
                     conditions = conditions | ((tok_idxs >= start) & (tok_idxs < stop))
                 tok_idxs = np.concatenate([rand_idxs, tok_idxs[conditions]])
             else:
-                tok_idxs = np.array(rand_idxs)
-            tok_idxs.sort() # faster lookups if in sequence
+                tok_idxs = rand_idxs
+            tok_idxs = np.sort(tok_idxs) # faster lookups if in sequence
         vecs = []
         orig_tok_idxs = tok_idxs
         for _ in toks:
