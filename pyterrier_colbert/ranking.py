@@ -652,7 +652,7 @@ class ColBERTFactory():
         else:
             return self._docid2docno[docid]
 
-    def index_scorer(self, query_encoded=False, add_ranks=False, add_docnos=True, batch_size=10000) -> TransformerBase:
+    def index_scorer(self, query_encoded=False, add_ranks=False, add_docnos=True, batch_size=10000, verbose=False) -> TransformerBase:
         """
         Returns a transformer that uses the ColBERT index to perform scoring of documents to queries 
         """
@@ -702,8 +702,8 @@ class ColBERTFactory():
             return qid_group
 
         if query_encoded:
-            return pt.apply.by_query(rrm_scorer_query_embs) 
-        return pt.apply.by_query(rrm_scorer) 
+            return pt.apply.by_query(rrm_scorer_query_embs, verbose=verbose)
+        return pt.apply.by_query(rrm_scorer, verbose=verbose)
 
     def end_to_end(self) -> TransformerBase:
         """
