@@ -702,8 +702,8 @@ class ColBERTFactory():
             return qid_group
 
         if query_encoded:
-            return pt.apply.by_query(rrm_scorer_query_embs, verbose=verbose)
-        return pt.apply.by_query(rrm_scorer, verbose=verbose)
+            return pt.apply.by_query(rrm_scorer_query_embs, verbose=verbose, add_ranks=False)
+        return pt.apply.by_query(rrm_scorer, verbose=verbose, add_ranks=False)
 
     def end_to_end(self) -> TransformerBase:
         """
