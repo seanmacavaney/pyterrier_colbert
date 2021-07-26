@@ -20,6 +20,8 @@ from colbert.indexing.loaders import load_doclens
 from tqdm import tqdm
 
 def load_tokenids(directory):
+    if os.path.exists(os.path.join(directory, 'tokens.np')):
+        return np.memmap(os.path.join(directory, 'tokens.np'), dtype=np.uint16, mode='r')
     parts, _, _ = get_parts(directory)
 
     tokenids_filenames = [os.path.join(directory, str(part) + ".tokenids") for part in parts]
@@ -85,34 +87,48 @@ class FaissNNTerm():
         
         self.tok = self.inference.query_tokenizer.tok
         vocab_size = self.tok.vocab_size
-        print("Computing collection frequencies")
-        self.lookup = torch.zeros(vocab_size, dtype=torch.int64)
-        indx, cnt = self.emb2tid.unique(return_counts=True)
-        self.lookup[indx] += cnt
-        print("Done")
+
+        if os.path.exists(os.path.join(index_path, 'cfs.np')):
+            self.lookup = np.memmap(os.path.join(index_path, 'cfs.np'), dtype=np.uint64, mode='r')
+        else:
+            print("Computing collection frequencies")
+            self.lookup = torch.zeros(vocab_size, dtype=torch.int64)
+            indx, cnt = self.emb2tid.unique(return_counts=True)
+            self.lookup[indx] += cnt
+            print("Done")
         
-        print("Loading doclens")
-        part_doclens = load_doclens(index_path, flatten=False)
-        import numpy as np
-        self.doclens = np.concatenate([np.array(part) for part in part_doclens])
-        self.num_docs = len(self.doclens)
-        self.end_offsets = np.cumsum(self.doclens)
+        if os.path.exists(os.path.join(index_path, 'doclens.psum.np')):
+            self.doclens = None
+            self.end_offsets = np.memmap(os.path.join(index_path, 'doclens.psum.np'), dtype=np.uint64, mode='r')
+        else:
+            print("Loading doclens")
+            part_doclens = load_doclens(index_path, flatten=False)
+            self.doclens = np.concatenate([np.array(part) for part in part_doclens])
+            self.num_docs = len(self.doclens)
+            self.end_offsets = np.cumsum(self.doclens)
         if df:
-            dfs=torch.zeros(vocab_size, dtype=torch.int64)
-            offset = 0
-            for doclen in tqdm(self.doclens, unit="d", desc="Computing document frequencies"):
-                tids= torch.unique(self.emb2tid[offset:offset+doclen])
-                dfs[tids] += 1
-                offset += doclen
-            self.dfs = dfs
+            if os.path.exists(os.path.join(index_path, 'dfs.np')):
+                self.dfs = np.memmap(os.path.join(index_path, 'dfs.np'), dtype=np.uint64, mode='r')
+            else:
+                dfs=torch.zeros(vocab_size, dtype=torch.int64)
+                offset = 0
+                for doclen in tqdm(self.doclens, unit="d", desc="Computing document frequencies"):
+                    tids= torch.unique(self.emb2tid[offset:offset+doclen])
+                    dfs[tids] += 1
+                    offset += doclen
+                self.dfs = dfs
     
     def get_tokens_for_doc(self, pid):
         """
         Returns the actual indexed tokens within a given document
         """
-        end_offset = self.end_offsets[pid]
-        start_offset = end_offset - self.doclens[pid]
-        return self.emb2tid[start_offset:end_offset]
+        if self.doclens is None:
+            start, stop = self.end_offsets[pid:pid+2]
+            return self.emb2tid[start:stop]
+        else:
+            end_offset = self.end_offsets[pid]
+            start_offset = end_offset - self.doclens[pid]
+            return self.emb2tid[start_offset:end_offset]
     
     def get_nearest_tokens_for_embs(self, embs : np.array, k=10, low_tf=0):
         """
