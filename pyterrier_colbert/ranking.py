@@ -996,7 +996,7 @@ class MultiFaissMmapIndex:
             embeddings_ids.append(some_embedding_ids + id_offset)
         scores = np.concatenate(scores, axis=1)
         embeddings_ids = np.concatenate(embeddings_ids, axis=1)
-        return scores, embedding_ids
+        return scores, embeddings_ids
 
 
     def embedding_ids_to_pids(self, embedding_ids, verbose=True):
