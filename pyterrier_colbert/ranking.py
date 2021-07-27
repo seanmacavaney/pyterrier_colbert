@@ -595,6 +595,47 @@ class ColBERTFactory():
         
         return pt.apply.generic(_single_retrieve_qembs if query_encoded else _single_retrieve)
 
+    def set_retrieve_approx(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, maxsim=False) -> TransformerBase:
+        assert not query_encoded
+        def _single_retrieve(queries_df):
+            rtr = []
+            iter = queries_df.itertuples()
+            iter = tqdm(iter, unit="q") if verbose else iter
+            for row in iter:
+                qid = row.qid
+                with torch.no_grad():
+                    Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
+                Q_f = Q[0:1, :, : ]
+                Q_cpu = Q[0, :, :].cpu()
+                Q_cpu_numpy = Q_cpu.float().numpy()
+                
+                if hasattr(self._faiss_index(), 'faiss_index'):
+                    all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
+                else:
+                    all_scores, all_embedding_ids = self._faiss_index().search(Q_cpu_numpy, faiss_depth, verbose=verbose)
+                pid2score = defaultdict(float)
+                for qpos in range(32):
+                    scores = all_scores[qpos]
+                    embedding_ids = all_embedding_ids[qpos]
+                    pids = self.faiss_index.emb2pid[embedding_ids]
+                    if maxsim:
+                        qpos_scores = defaultdict(float)
+                        for (score, pid) in zip(scores, pids):
+                            _pid = int(pid)
+                            qpos_scores[_pid] = max(qpos_scores[_pid], score)
+                        for (pid, score) in qpos_scores.items():
+                            pid2score[pid] += score
+                    else:
+                        for (score, pid) in zip(scores, pids):
+                            pid2score[int(pid)] += score
+                for pid, score in pid2score.items():
+                    rtr.append([qid, row.query, pid, score, ids[0], Q_cpu])
+
+            #TODO this _add_docnos shouldnt be needed
+            return self._add_docnos( pt.model.add_ranks(pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs'])) )
+        return pt.apply.by_query(_single_retrieve, add_ranks=False)
+
+
     def text_scorer(self, query_encoded=False, doc_attr="text", verbose=False) -> TransformerBase:
         """
         Returns a transformer that uses ColBERT model to score the *text* of documents.
