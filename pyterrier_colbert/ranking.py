@@ -617,7 +617,10 @@ class ColBERTFactory():
                 for qpos in range(32):
                     scores = all_scores[qpos]
                     embedding_ids = all_embedding_ids[qpos]
-                    pids = self.faiss_index.emb2pid[embedding_ids]
+                    if hasattr(self.faiss_index, 'emb2pid'):
+                        pids = self.faiss_index.emb2pid[embedding_ids]
+                    else:
+                        pids = np.searchsorted(self.faiss_index.doc_offsets, embedding_ids, side='right') - 1
                     if maxsim:
                         qpos_scores = defaultdict(float)
                         for (score, pid) in zip(scores, pids):
@@ -633,7 +636,7 @@ class ColBERTFactory():
 
             #TODO this _add_docnos shouldnt be needed
             return self._add_docnos( pt.model.add_ranks(pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs'])) )
-        return pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=True)
+        return pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
 
 
     def text_scorer(self, query_encoded=False, doc_attr="text", verbose=False) -> TransformerBase:
