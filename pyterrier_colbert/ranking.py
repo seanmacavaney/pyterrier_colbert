@@ -633,7 +633,7 @@ class ColBERTFactory():
 
             #TODO this _add_docnos shouldnt be needed
             return self._add_docnos( pt.model.add_ranks(pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs'])) )
-        return pt.apply.by_query(_single_retrieve, add_ranks=False)
+        return pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=True)
 
 
     def text_scorer(self, query_encoded=False, doc_attr="text", verbose=False) -> TransformerBase:
