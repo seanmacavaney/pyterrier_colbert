@@ -34,7 +34,8 @@ class Object(object):
 
 class FaissNNTerm():
 
-    def __init__(self, colbert, index_root, index_name, nprobe=10, partitions=None, part_range=None, query_maxlen=32, faiss_index=None, df=False):
+    def __init__(self, colbert, index_root, index_name, nprobe=10, partitions=None, part_range=None, query_maxlen=32, faiss_index=None, df=False, verbose=False):
+        self.verbose = verbose
         if type(colbert) == str:
             args = Object()
             args.checkpoint = colbert
