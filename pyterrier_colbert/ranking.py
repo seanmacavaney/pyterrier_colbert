@@ -815,7 +815,7 @@ from pyterrier.transformer import TransformerBase
 import pandas as pd
 
 class ColbertPRF(TransformerBase):
-    def __init__(self, pytcfactory, k, fb_embs, beta=1, r = 42, return_docs = False, fb_docs=10,  *args, **kwargs):
+    def __init__(self, pytcfactory, k, fb_embs, beta=1, r = 42, return_docs = False, fb_docs=10, verbose=False,  *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.k = k
         self.fb_embs = fb_embs
@@ -825,6 +825,7 @@ class ColbertPRF(TransformerBase):
         self.pytcfactory = pytcfactory
         self.fnt = pytcfactory.nn_term(df=True)
         self.r = r
+        self.verbose = verbose
         import torch
         import numpy as np
         num_docs = self.fnt.num_docs
@@ -917,7 +918,10 @@ class ColbertPRF(TransformerBase):
             topics_and_docs = self.pytcfactory.add_docids(topics_and_docs)
         
         rtr = []
-        for qid, res in topics_and_docs.groupby("qid"):
+        it = topics_and_docs.groupby("qid")
+        if self.verbose:
+            it = pt.tqdm(it, unit='query', desc='colbert-prf')
+        for qid, res in it:
             new_query_df = self.transform_query(res)     
             if self.return_docs:
                 new_query_df = res[["qid", "docno", "docid"]].merge(new_query_df, on=["qid"])
