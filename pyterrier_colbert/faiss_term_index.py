@@ -141,7 +141,7 @@ class FaissNNTerm():
         if hasattr(self.faiss_index, 'faiss_index'):
             _, ids = self.faiss_index.faiss_index.search(embs, k=k)
         else:
-            _, ids = self.faiss_index.search(embs, k=k)
+            _, ids = self.faiss_index.search(embs, k=k, verbose=self.verbose)
         
         rtrs=[]
         for id_set in ids:

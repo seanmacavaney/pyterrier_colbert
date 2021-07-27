@@ -986,7 +986,7 @@ class MultiFaissMmapIndex:
 
         return embeddings_ids
 
-    def search(self, embs, k):
+    def search(self, embs, k, verbose=False):
         scores, embeddings_ids = [], []
         per_index_faiss_depth = k // len(self.faiss_indices)
         for i, (index, id_offset) in enumerate(zip(self.faiss_indices, self.faiss_indices_offsets)):
