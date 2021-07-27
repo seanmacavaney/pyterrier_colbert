@@ -982,6 +982,20 @@ class MultiFaissMmapIndex:
 
         return embeddings_ids
 
+    def search(self, embs, k):
+        scores, embeddings_ids = [], []
+        per_index_faiss_depth = k // len(self.faiss_indices)
+        for i, (index, id_offset) in enumerate(zip(self.faiss_indices, self.faiss_indices_offsets)):
+            print_message(f"#> Searching index {i}...", condition=verbose)
+            some_scores, some_embedding_ids = index.search(embs, per_index_faiss_depth)
+            scores.append(some_scores)
+            embeddings_ids.append(some_embedding_ids + id_offset)
+            print(some_embedding_ids.shape, scores.shape)
+        scores = np.concatenate(scores, axis=1)
+        embeddings_ids = np.concatenate(embeddings_ids, axis=1)
+        return scores, embedding_ids
+
+
     def embedding_ids_to_pids(self, embedding_ids, verbose=True):
         # Find unique PIDs per query.
         print_message("#> Lookup the PIDs..", condition=verbose)

@@ -138,7 +138,10 @@ class FaissNNTerm():
         from collections import defaultdict
         assert len(embs.shape) == 2
         
-        _, ids = self.faiss_index.faiss_index.search(embs, k=k)
+        if hasattr(self.faiss_index, 'faiss_index'):
+            _, ids = self.faiss_index.faiss_index.search(embs, k=k)
+        else:
+            _, ids = self.faiss_index.search(embs, k=k)
         
         rtrs=[]
         for id_set in ids:
