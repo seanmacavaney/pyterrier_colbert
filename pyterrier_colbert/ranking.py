@@ -483,7 +483,7 @@ class ColBERTFactory():
             self.index_root,
             self.index_name,
             faiss_index = self._faiss_index(),
-            df=df)
+            df=df, verbose=self.verbose)
         return self._faissnn
 
     def query_encoder(self, detach=True) -> TransformerBase:
@@ -823,7 +823,7 @@ class ColbertPRF(TransformerBase):
         self.return_docs = return_docs
         self.fb_docs = fb_docs
         self.pytcfactory = pytcfactory
-        self.fnt = pytcfactory.nn_term(df=True, verbose=verbose)
+        self.fnt = pytcfactory.nn_term(df=True)
         self.r = r
         self.verbose = verbose
         import torch
