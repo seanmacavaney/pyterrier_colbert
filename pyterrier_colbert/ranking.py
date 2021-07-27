@@ -992,7 +992,7 @@ class MultiFaissMmapIndex:
         for i, (index, id_offset) in enumerate(zip(self.faiss_indices, self.faiss_indices_offsets)):
             print_message(f"#> Searching index {i}...", condition=verbose)
             some_scores, some_embedding_ids = index.search(embs, per_index_faiss_depth)
-            scores.append(some_scores[0])
+            scores.append(some_scores)
             embeddings_ids.append(some_embedding_ids + id_offset)
         scores = np.concatenate(scores, axis=1)
         embeddings_ids = np.concatenate(embeddings_ids, axis=1)
