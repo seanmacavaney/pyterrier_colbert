@@ -100,6 +100,7 @@ class FaissNNTerm():
         if os.path.exists(os.path.join(index_path, 'doclens.psum.np')):
             self.doclens = None
             self.end_offsets = np.memmap(os.path.join(index_path, 'doclens.psum.np'), dtype=np.uint64, mode='r')
+            self.num_docs = self.end_offsets.shape[0] - 1
         else:
             print("Loading doclens")
             part_doclens = load_doclens(index_path, flatten=False)
