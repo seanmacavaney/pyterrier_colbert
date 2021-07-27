@@ -994,6 +994,7 @@ class MultiFaissMmapIndex:
             some_scores, some_embedding_ids = index.search(embs, per_index_faiss_depth)
             scores.append(some_scores)
             embeddings_ids.append(some_embedding_ids + id_offset)
+            import pdb; pdb.set_trace()
             print(some_embedding_ids.shape, scores.shape)
         scores = np.concatenate(scores, axis=1)
         embeddings_ids = np.concatenate(embeddings_ids, axis=1)
