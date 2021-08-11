@@ -826,6 +826,77 @@ class ColBERTFactory():
         #output: qid, query, docno, score
         return self.set_retrieve() >> self.index_scorer(query_encoded=True)
 
+    def fetch_index_encodings(factory, verbose=False) -> TransformerBase:
+        """
+        New encoder that gets embeddings from rrm and stores into doc_emsb column
+        input: docid, ...
+        output: ditto + doc_embs
+        """
+        def _get_embs(self, df):
+            if verbose:
+                import pyterrier as pt
+                pt.tqdm.pandas()
+                df["doc_embs"] = df.docid.progress_apply(factory.rrm.get_embedding)
+            else:
+                df["doc_embs"] = df.docid.apply(factory.rrm.get_embedding)
+            return df
+    return pt.apply.by_query(_get_embs)
+
+    def scorer(factory, verbose=False) -> TransformerBase:
+        """
+        Calculates the ColBERT max_sim operator using previous encodings of queries and documents
+        input: qid, query_embs, [query_weights], docno, doc_embs
+        output: ditto + score
+        """
+        import torch
+        colbert = factory.args.colbert
+        def _score_query(df):
+            weightsQ = None
+            Q = torch.cat([df.query_embs[0]])
+            if "query_weights" in df.columns:
+                weightsQ = df.iloc[0].query_weights
+            else:
+                weightsQ = torch.ones(Q.shape[0])        
+            D = torch.zeros(len(df), factory.args.doc_maxlen, factory.args.dim)
+            iter = range(len(df))
+            if verbose:
+                iter = pt.tqdm(iter, total=len(df))
+            for i in iter:
+                doc_embs = df.iloc[i].doc_embs
+                doclen = doc_embs.shape[0]
+                D[i, 0:doclen, :] =  doc_embs   
+            maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values.cpu()
+            scores = (weightsQ*maxscoreQ).sum(1).cpu()
+            df["score"] = scores.tolist()
+            return df
+            
+        return pt.apply.by_query(_score_query)
+
+    def doc_encoder(self, detach=True, text_attr='text', verbose=False) -> TransformerBase:
+        """
+        Returns a transformer that can encode passages using ColBERT's model.
+        input: *, text
+        output: *, text, doc_embs
+        """
+        def _encode_doc(row):
+            import torch
+            with torch.no_grad():
+                Q = self.args.inference.docFromText([row[text_attr]], bsize=512)
+                if detach:
+                    Q = Q.cpu()
+                return Q[0]
+
+        def row_apply(df):
+            import pyterrier as pt
+            if verbose:
+                pt.tqdm.pandas()
+                df["doc_embs"] = df.progress_apply(_encode_doc, axis=1)
+            else:
+                df["doc_embs"] = df.apply(_encode_doc, axis=1)
+            return df
+
+        return pt.apply.generic(row_apply)
+
     def prf(pytcolbert, rerank, fb_docs=3, fb_embs=10, beta=1.0, k=24) -> TransformerBase:
         """
         Returns a pipeline for ColBERT PRF, either as a ranker, or a re-ranker. Final ranking is cutoff at 1000 docs.
