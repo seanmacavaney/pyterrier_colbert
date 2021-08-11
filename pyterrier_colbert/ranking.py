@@ -596,13 +596,19 @@ class ColBERTFactory():
         return pt.apply.generic(_single_retrieve_qembs if query_encoded else _single_retrieve)
 
     def set_retrieve_approx(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, maxsim=False) -> TransformerBase:
-        assert not query_encoded
         def _single_retrieve(queries_df):
             rtr = []
             iter = queries_df.itertuples()
             iter = tqdm(iter, unit="q") if verbose else iter
             for row in iter:
                 qid = row.qid
+                if query_encoded:
+                    embs = row.query_embs
+                    qtoks = row.query_toks
+                    ids = np.expand_dims(qtoks, axis=0)
+                    Q_cpu = embs.cpu()
+                    Q_cpu_numpy = embs.float().numpy()
+                else:
                 with torch.no_grad():
                     Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
                 Q_f = Q[0:1, :, : ]
