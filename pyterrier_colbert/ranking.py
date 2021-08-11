@@ -659,11 +659,11 @@ class ColBERTFactory():
                     Q_cpu = embs.cpu()
                     Q_cpu_numpy = embs.float().numpy()
                 else:
-                with torch.no_grad():
-                    Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
-                Q_f = Q[0:1, :, : ]
-                Q_cpu = Q[0, :, :].cpu()
-                Q_cpu_numpy = Q_cpu.float().numpy()
+                    with torch.no_grad():
+                        Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
+                    Q_f = Q[0:1, :, : ]
+                    Q_cpu = Q[0, :, :].cpu()
+                    Q_cpu_numpy = Q_cpu.float().numpy()
                 
                 if hasattr(self._faiss_index(), 'faiss_index'):
                     all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
