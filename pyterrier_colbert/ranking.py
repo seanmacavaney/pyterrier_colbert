@@ -894,10 +894,13 @@ class ColbertPRF(TransformerBase):
         kmn = KMeans(self.k, random_state=self.r)
         kmn.fit(prf_embs)
         return np.float32(kmn.cluster_centers_)
+    
+    def _get_prf_embs(self, df, num_docs):
+        return torch.cat([self.pytcfactory.rrm.get_embedding(docid) for docid in df.head(num_docs).docid.values])
         
     def transform_query(self, topic_and_res : pd.DataFrame) -> pd.DataFrame:
         topic_and_res = topic_and_res.sort_values('rank')
-        prf_embs = torch.cat([self.pytcfactory.rrm.get_embedding(docid) for docid in topic_and_res.head(self.fb_docs).docid.values])
+        prf_embs = self._get_prf_embs(topic_and_res, self.fb_docs)
         
         # perform clustering on the document embeddings to identify the representative embeddings
         centroids = self._get_centroids(prf_embs)
