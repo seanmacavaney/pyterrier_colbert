@@ -387,6 +387,17 @@ class ColBERTFactory():
         args.mask_punctuation = False
         args.partitions = faiss_partitions
 
+        self._init_args = [
+            colbert_model,
+            index_root,
+            index_name,
+        ]
+        self._init_kwargs ={
+            'faiss_partitions' : faiss_partitions,
+            'memtype' : memtype,
+            'gpu' : gpu
+        }
+
         self.verbose = False
         self._faissnn = None
         self.index_root = index_root
@@ -446,6 +457,16 @@ class ColBERTFactory():
         self.rrm = None
         self.faiss_index = None
         
+    def __reduce_ex__(self, proto):
+        return (
+            ColBERTFactory,
+            (*self._init_args, *self._init_kwargs),
+            None
+        )
+
+    def __get_state__(self):
+        return None
+    
     def _rrm(self):
         """
         Returns an instance of the re_ranker_mmap class.
@@ -642,7 +663,19 @@ class ColBERTFactory():
 
             #TODO this _add_docnos shouldnt be needed
             return self._add_docnos( pt.model.add_ranks(pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs'])) )
-        return pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
+        t = pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
+        import types
+        def __reduce_ex__(t2, proto):
+            kwargs = { 'batch':batch, 'query_encoded': query_encoded, 'faiss_depth' : faiss_depth, 'maxsim': maxsim}
+            return (
+                set_retrieve_approx,
+                #self is the factory, and it will be serialised using its own __reduce_ex__ method
+                (self, [], kwargs),
+                None
+            )
+        t.__reduce_ex__ = types.MethodType(__reduce_ex__, t)
+        t.__getstate__ = types.MethodType(lambda t2 : None, t)
+        return t
 
 
     def text_scorer(self, query_encoded=False, doc_attr="text", verbose=False) -> TransformerBase:
