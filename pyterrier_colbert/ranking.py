@@ -7,6 +7,7 @@ import pandas as pd
 import pyterrier as pt
 from pyterrier import tqdm
 from pyterrier.transformer import TransformerBase
+from pyterrier.datasets import Dataset
 from typing import Union, Tuple
 import random
 from colbert.evaluation.load_model import load_model
@@ -467,6 +468,30 @@ class ColBERTFactory():
     def __get_state__(self):
         return None
     
+    
+    #allows a colbert index to be built from a dataset
+    def from_dataset(dataset : Union[str,Dataset], 
+            variant : str = None, 
+            version='latest',            
+            **kwargs):
+        
+        from pyterrier.batchretrieve import _from_dataset
+        
+        #colbertfactory doesnt match quite the expectations, so we can use a wrapper fb
+        def _construct(folder, **kwargs):
+            import os
+            index_loc = os.path.dirname(folder)
+            index_name = os.path.dirname(folder)
+            checkpoint = kwargs.get('checkpoint')
+            del(kwargs['checkpoint'])
+            return ColBERTFactory(checkpoint, index_loc, index_name, **kwargs)
+        
+        return _from_dataset(dataset, 
+                             variant=variant, 
+                             version=version, 
+                             clz=_construct)
+        
+        
     def _rrm(self):
         """
         Returns an instance of the re_ranker_mmap class.
