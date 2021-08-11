@@ -34,7 +34,7 @@ class Object(object):
 
 class FaissNNTerm():
 
-    def __init__(self, colbert, index_root, index_name, nprobe=10, partitions=None, part_range=None, query_maxlen=32, faiss_index=None, df=False, verbose=False):
+    def __init__(self, colbert, index_root, index_name, nprobe=10, partitions=None, part_range=None, query_maxlen=32, faiss_index=None, cf=False, df=False, verbose=False, stats_sample_fraction=0.2):
         self.verbose = verbose
         if type(colbert) == str:
             args = Object()
@@ -89,33 +89,48 @@ class FaissNNTerm():
         self.tok = self.inference.query_tokenizer.tok
         vocab_size = self.tok.vocab_size
 
-        if os.path.exists(os.path.join(index_path, 'cfs.np')):
-            self.lookup = np.memmap(os.path.join(index_path, 'cfs.np'), dtype=np.uint64, mode='r')
-        else:
-            print("Computing collection frequencies")
-            self.lookup = torch.zeros(vocab_size, dtype=torch.int64)
-            indx, cnt = self.emb2tid.unique(return_counts=True)
-            self.lookup[indx] += cnt
-            print("Done")
+        if cf:
+            if os.path.exists(os.path.join(index_path, 'cfs.np')):
+                self.lookup = np.memmap(os.path.join(index_path, 'cfs.np'), dtype=np.uint64, mode='r')
+            else:
+                samplerange=len(self.emb2tid)
+                samplerange = int(samplerange*stats_sample_fraction)
+                print("Computing collection frequencies")
+                #self.lookup = torch.zeros(vocab_size, dtype=torch.int64)
+                self.lookup = np.zeros(vocab_size, dtype=np.int64)
+                #.astype(np.int64, copy=False)
+                indx, cnt = np.unique(self.emb2tid[0:samplerange], return_counts=True)
+                self.lookup[indx] += cnt
+                print("Done")
         
         if os.path.exists(os.path.join(index_path, 'doclens.psum.np')):
             self.doclens = None
             self.end_offsets = np.memmap(os.path.join(index_path, 'doclens.psum.np'), dtype=np.uint64, mode='r')
             self.num_docs = self.end_offsets.shape[0] - 1
+            #inverse of cumsum
+            #https://stackoverflow.com/questions/38666924/what-is-the-inverse-of-the-numpy-cumsum-function
+            self.doclens = self.end_offsets.copy()            
+            self.doclens[1:] -= self.end_offsets[:-1]
+            print(self.doclens[0:4])
         else:
             print("Loading doclens")
             part_doclens = load_doclens(index_path, flatten=False)
             self.doclens = np.concatenate([np.array(part) for part in part_doclens])
             self.num_docs = len(self.doclens)
             self.end_offsets = np.cumsum(self.doclens)
+            
         if df:
             if os.path.exists(os.path.join(index_path, 'dfs.np')):
                 self.dfs = np.memmap(os.path.join(index_path, 'dfs.np'), dtype=np.uint64, mode='r')
             else:
-                dfs=torch.zeros(vocab_size, dtype=torch.int64)
+                dfs=np.zeros(vocab_size, dtype=np.int64)
                 offset = 0
-                for doclen in tqdm(self.doclens, unit="d", desc="Computing document frequencies"):
-                    tids= torch.unique(self.emb2tid[offset:offset+doclen])
+                samplerange = len(self.doclens)
+                samplerange = int(samplerange*stats_sample_fraction)
+                import pyterrier as pt
+                for doclen in pt.tqdm(self.doclens[0:samplerange], unit="d", desc="Computing document frequencies"):
+                    doclen=int(doclen)
+                    tids = np.unique(self.emb2tid[offset:offset+doclen])
                     dfs[tids] += 1
                     offset += doclen
                 self.dfs = dfs
