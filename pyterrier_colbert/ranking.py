@@ -443,7 +443,7 @@ class ColBERTFactory():
             import colbert.modeling.colbert
             colbert.parameters.DEVICE = colbert.evaluation.load_model.DEVICE = colbert.modeling.colbert.DEVICE = torch.device("cpu")
             self.gpu = False
-            
+
         if isinstance (colbert_model, str):
             args.checkpoint = colbert_model
             args.colbert, args.checkpoint = load_model(args)
@@ -763,7 +763,7 @@ class ColBERTFactory():
                 return None
             return self._docno_sorted_idxs_mmap[sorted_idx]
         else:
-            return self._docid2docno[docid]
+            return self._docno2docid[docno]
 
     def index_scorer(self, query_encoded=False, add_ranks=False, add_docnos=True, batch_size=10000, verbose=False) -> TransformerBase:
         """
@@ -841,7 +841,7 @@ class ColBERTFactory():
             else:
                 df["doc_embs"] = df.docid.apply(factory.rrm.get_embedding)
             return df
-    return pt.apply.by_query(_get_embs)
+        return pt.apply.by_query(_get_embs)
 
     def scorer(factory, verbose=False) -> TransformerBase:
         """
