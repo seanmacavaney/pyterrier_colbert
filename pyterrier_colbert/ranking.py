@@ -24,7 +24,6 @@ from collections import defaultdict
 import numpy as np
 import pickle
 from warnings import warn
-from pyterrier_colbert.faiss_term_index import FaissNNTerm
 
 class file_part_mmap:
     def __init__(self, file_path, file_doclens):
@@ -435,6 +434,7 @@ class ColBERTFactory():
             warn("Faiss not installed. You cannot do retrieval")
 
         self.faiss_index_on_gpu = True
+        self.gpu = True
         if not gpu:
             self.faiss_index_on_gpu = False
             warn("Gpu disabled, YMMV")
@@ -442,7 +442,8 @@ class ColBERTFactory():
             import colbert.evaluation.load_model
             import colbert.modeling.colbert
             colbert.parameters.DEVICE = colbert.evaluation.load_model.DEVICE = colbert.modeling.colbert.DEVICE = torch.device("cpu")
-
+            self.gpu = False
+            
         if isinstance (colbert_model, str):
             args.checkpoint = colbert_model
             args.colbert, args.checkpoint = load_model(args)
@@ -803,9 +804,9 @@ class ColBERTFactory():
             if "query_weights" in qid_group.columns:
                 weights = qid_group.iloc[0].query_weights
             if batch_size > 0:
-                scores = rrm.our_rerank_with_embeddings_batched(qid_group.iloc[0]["query_embs"], docids, weights, batch_size=batch_size)
+                scores = rrm.our_rerank_with_embeddings_batched(qid_group.iloc[0]["query_embs"], docids, weights, batch_size=batch_size, gpu=self.gpu)
             else:
-                scores = rrm.our_rerank_with_embeddings(qid_group.iloc[0]["query_embs"], docids, weights)
+                scores = rrm.our_rerank_with_embeddings(qid_group.iloc[0]["query_embs"], docids, weights, gpu=self.gpu)
             qid_group["score"] = scores
             if "docno" not in qid_group.columns and add_docnos:
                 qid_group = self._add_docnos(qid_group)
@@ -988,11 +989,13 @@ class ColBERTFactory():
             plt.text(i-0.25, maxpos+0.1, "X", fontsize=5)
             contributions.append(interaction[maxpos,i])
 
-        ax1.bar([0.5 + i for i in range(0,32)], contributions)
+        from sklearn.preprocessing import minmax_scale
+        ax1.bar([0.5 + i for i in range(0,32)], contributions, color=plt.cm.Blues(minmax_scale(contributions, feature_range=(0.4, 1))))
+        ax1.set_xlim([0,32])
         ax1.set_xticklabels([])
         fig.tight_layout()
         #fig.subplots_adjust(hspace=-0.37)
-        fig.show()
+        return fig
 
 from pyterrier.transformer import TransformerBase
 import pandas as pd
