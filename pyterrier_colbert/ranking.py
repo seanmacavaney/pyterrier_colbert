@@ -7,6 +7,7 @@ import pandas as pd
 import pyterrier as pt
 from pyterrier import tqdm
 from pyterrier.transformer import TransformerBase
+from pyterrier.datasets import Dataset
 from typing import Union, Tuple
 import random
 from colbert.evaluation.load_model import load_model
@@ -23,7 +24,6 @@ from collections import defaultdict
 import numpy as np
 import pickle
 from warnings import warn
-from pyterrier_colbert.faiss_term_index import FaissNNTerm
 
 class file_part_mmap:
     def __init__(self, file_path, file_doclens):
@@ -387,6 +387,17 @@ class ColBERTFactory():
         args.mask_punctuation = False
         args.partitions = faiss_partitions
 
+        self._init_args = [
+            colbert_model,
+            index_root,
+            index_name,
+        ]
+        self._init_kwargs ={
+            'faiss_partitions' : faiss_partitions,
+            'memtype' : memtype,
+            'gpu' : gpu
+        }
+
         self.verbose = False
         self._faissnn = None
         self.index_root = index_root
@@ -421,12 +432,18 @@ class ColBERTFactory():
             import faiss
         except: # TODO: shouldn't this be ImportError?
             warn("Faiss not installed. You cannot do retrieval")
+
         self.faiss_index_on_gpu = True
+        self.gpu = True
         if not gpu:
             self.faiss_index_on_gpu = False
             warn("Gpu disabled, YMMV")
             import colbert.parameters
-            colbert.parameters.DEVICE = torch.device("cpu")
+            import colbert.evaluation.load_model
+            import colbert.modeling.colbert
+            colbert.parameters.DEVICE = colbert.evaluation.load_model.DEVICE = colbert.modeling.colbert.DEVICE = torch.device("cpu")
+            self.gpu = False
+
         if isinstance (colbert_model, str):
             args.checkpoint = colbert_model
             args.colbert, args.checkpoint = load_model(args)
@@ -445,6 +462,40 @@ class ColBERTFactory():
         #we load this lazily
         self.rrm = None
         self.faiss_index = None
+        
+    def __reduce_ex__(self, proto):
+        return (
+            ColBERTFactory,
+            (*self._init_args, *self._init_kwargs),
+            None
+        )
+
+    def __get_state__(self):
+        return None
+    
+    
+    #allows a colbert index to be built from a dataset
+    def from_dataset(dataset : Union[str,Dataset], 
+            variant : str = None, 
+            version='latest',            
+            **kwargs):
+        
+        from pyterrier.batchretrieve import _from_dataset
+        
+        #colbertfactory doesnt match quite the expectations, so we can use a wrapper fb
+        def _construct(folder, **kwargs):
+            import os
+            index_loc = os.path.dirname(folder)
+            index_name = os.path.dirname(folder)
+            checkpoint = kwargs.get('colbert_factory')
+            del(kwargs['colbert_factory'])
+            return ColBERTFactory(checkpoint, index_loc, index_name, **kwargs)
+        
+        return _from_dataset(dataset, 
+                             variant=variant, 
+                             version=version, 
+                             clz=_construct)
+        
         
     def _rrm(self):
         """
@@ -596,25 +647,31 @@ class ColBERTFactory():
         return pt.apply.generic(_single_retrieve_qembs if query_encoded else _single_retrieve)
 
     def set_retrieve_approx(self, batch=False, query_encoded=False, faiss_depth=1000, verbose=False, maxsim=False) -> TransformerBase:
-        assert not query_encoded
         def _single_retrieve(queries_df):
             rtr = []
             iter = queries_df.itertuples()
             iter = tqdm(iter, unit="q") if verbose else iter
             for row in iter:
                 qid = row.qid
-                with torch.no_grad():
-                    Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
-                Q_f = Q[0:1, :, : ]
-                Q_cpu = Q[0, :, :].cpu()
-                Q_cpu_numpy = Q_cpu.float().numpy()
+                if query_encoded:
+                    embs = row.query_embs
+                    qtoks = row.query_toks
+                    ids = np.expand_dims(qtoks, axis=0)
+                    Q_cpu = embs.cpu()
+                    Q_cpu_numpy = embs.float().numpy()
+                else:
+                    with torch.no_grad():
+                        Q, ids, masks = self.args.inference.queryFromText([row.query], bsize=512, with_ids=True)
+                    Q_f = Q[0:1, :, : ]
+                    Q_cpu = Q[0, :, :].cpu()
+                    Q_cpu_numpy = Q_cpu.float().numpy()
                 
                 if hasattr(self._faiss_index(), 'faiss_index'):
                     all_scores, all_embedding_ids = self._faiss_index().faiss_index.search(Q_cpu_numpy, faiss_depth)
                 else:
                     all_scores, all_embedding_ids = self._faiss_index().search(Q_cpu_numpy, faiss_depth, verbose=verbose)
                 pid2score = defaultdict(float)
-                for qpos in range(32):
+                for qpos in range(len(ids)):
                     scores = all_scores[qpos]
                     embedding_ids = all_embedding_ids[qpos]
                     if hasattr(self.faiss_index, 'emb2pid'):
@@ -636,7 +693,19 @@ class ColBERTFactory():
 
             #TODO this _add_docnos shouldnt be needed
             return self._add_docnos( pt.model.add_ranks(pd.DataFrame(rtr, columns=["qid","query",'docid', 'score','query_toks','query_embs'])) )
-        return pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
+        t = pt.apply.by_query(_single_retrieve, add_ranks=False, verbose=verbose)
+        import types
+        def __reduce_ex__(t2, proto):
+            kwargs = { 'batch':batch, 'query_encoded': query_encoded, 'faiss_depth' : faiss_depth, 'maxsim': maxsim}
+            return (
+                set_retrieve_approx,
+                #self is the factory, and it will be serialised using its own __reduce_ex__ method
+                (self, [], kwargs),
+                None
+            )
+        t.__reduce_ex__ = types.MethodType(__reduce_ex__, t)
+        t.__getstate__ = types.MethodType(lambda t2 : None, t)
+        return t
 
 
     def text_scorer(self, query_encoded=False, doc_attr="text", verbose=False) -> TransformerBase:
@@ -694,7 +763,7 @@ class ColBERTFactory():
                 return None
             return self._docno_sorted_idxs_mmap[sorted_idx]
         else:
-            return self._docid2docno[docid]
+            return self._docno2docid[docno]
 
     def index_scorer(self, query_encoded=False, add_ranks=False, add_docnos=True, batch_size=10000, verbose=False) -> TransformerBase:
         """
@@ -735,9 +804,9 @@ class ColBERTFactory():
             if "query_weights" in qid_group.columns:
                 weights = qid_group.iloc[0].query_weights
             if batch_size > 0:
-                scores = rrm.our_rerank_with_embeddings_batched(qid_group.iloc[0]["query_embs"], docids, weights, batch_size=batch_size)
+                scores = rrm.our_rerank_with_embeddings_batched(qid_group.iloc[0]["query_embs"], docids, weights, batch_size=batch_size, gpu=self.gpu)
             else:
-                scores = rrm.our_rerank_with_embeddings(qid_group.iloc[0]["query_embs"], docids, weights)
+                scores = rrm.our_rerank_with_embeddings(qid_group.iloc[0]["query_embs"], docids, weights, gpu=self.gpu)
             qid_group["score"] = scores
             if "docno" not in qid_group.columns and add_docnos:
                 qid_group = self._add_docnos(qid_group)
@@ -757,6 +826,77 @@ class ColBERTFactory():
         #input: qid, query, 
         #output: qid, query, docno, score
         return self.set_retrieve() >> self.index_scorer(query_encoded=True)
+
+    def fetch_index_encodings(factory, verbose=False) -> TransformerBase:
+        """
+        New encoder that gets embeddings from rrm and stores into doc_emsb column
+        input: docid, ...
+        output: ditto + doc_embs
+        """
+        def _get_embs(self, df):
+            if verbose:
+                import pyterrier as pt
+                pt.tqdm.pandas()
+                df["doc_embs"] = df.docid.progress_apply(factory.rrm.get_embedding)
+            else:
+                df["doc_embs"] = df.docid.apply(factory.rrm.get_embedding)
+            return df
+        return pt.apply.by_query(_get_embs)
+
+    def scorer(factory, verbose=False) -> TransformerBase:
+        """
+        Calculates the ColBERT max_sim operator using previous encodings of queries and documents
+        input: qid, query_embs, [query_weights], docno, doc_embs
+        output: ditto + score
+        """
+        import torch
+        colbert = factory.args.colbert
+        def _score_query(df):
+            weightsQ = None
+            Q = torch.cat([df.query_embs[0]])
+            if "query_weights" in df.columns:
+                weightsQ = df.iloc[0].query_weights
+            else:
+                weightsQ = torch.ones(Q.shape[0])        
+            D = torch.zeros(len(df), factory.args.doc_maxlen, factory.args.dim)
+            iter = range(len(df))
+            if verbose:
+                iter = pt.tqdm(iter, total=len(df))
+            for i in iter:
+                doc_embs = df.iloc[i].doc_embs
+                doclen = doc_embs.shape[0]
+                D[i, 0:doclen, :] =  doc_embs   
+            maxscoreQ = (Q @ D.permute(0, 2, 1)).max(2).values.cpu()
+            scores = (weightsQ*maxscoreQ).sum(1).cpu()
+            df["score"] = scores.tolist()
+            return df
+            
+        return pt.apply.by_query(_score_query)
+
+    def doc_encoder(self, detach=True, text_attr='text', verbose=False) -> TransformerBase:
+        """
+        Returns a transformer that can encode passages using ColBERT's model.
+        input: *, text
+        output: *, text, doc_embs
+        """
+        def _encode_doc(row):
+            import torch
+            with torch.no_grad():
+                Q = self.args.inference.docFromText([row[text_attr]], bsize=512)
+                if detach:
+                    Q = Q.cpu()
+                return Q[0]
+
+        def row_apply(df):
+            import pyterrier as pt
+            if verbose:
+                pt.tqdm.pandas()
+                df["doc_embs"] = df.progress_apply(_encode_doc, axis=1)
+            else:
+                df["doc_embs"] = df.apply(_encode_doc, axis=1)
+            return df
+
+        return pt.apply.generic(row_apply)
 
     def prf(pytcolbert, rerank, fb_docs=3, fb_embs=10, beta=1.0, k=24) -> TransformerBase:
         """
@@ -849,11 +989,13 @@ class ColBERTFactory():
             plt.text(i-0.25, maxpos+0.1, "X", fontsize=5)
             contributions.append(interaction[maxpos,i])
 
-        ax1.bar([0.5 + i for i in range(0,32)], contributions)
+        from sklearn.preprocessing import minmax_scale
+        ax1.bar([0.5 + i for i in range(0,32)], contributions, color=plt.cm.Blues(minmax_scale(contributions, feature_range=(0.4, 1))))
+        ax1.set_xlim([0,32])
         ax1.set_xticklabels([])
         fig.tight_layout()
         #fig.subplots_adjust(hspace=-0.37)
-        fig.show()
+        return fig
 
 from pyterrier.transformer import TransformerBase
 import pandas as pd
@@ -894,10 +1036,13 @@ class ColbertPRF(TransformerBase):
         kmn = KMeans(self.k, random_state=self.r)
         kmn.fit(prf_embs)
         return np.float32(kmn.cluster_centers_)
+    
+    def _get_prf_embs(self, df, num_docs):
+        return torch.cat([self.pytcfactory.rrm.get_embedding(docid) for docid in df.head(num_docs).docid.values])
         
     def transform_query(self, topic_and_res : pd.DataFrame) -> pd.DataFrame:
         topic_and_res = topic_and_res.sort_values('rank')
-        prf_embs = torch.cat([self.pytcfactory.rrm.get_embedding(docid) for docid in topic_and_res.head(self.fb_docs).docid.values])
+        prf_embs = self._get_prf_embs(topic_and_res, self.fb_docs)
         
         # perform clustering on the document embeddings to identify the representative embeddings
         centroids = self._get_centroids(prf_embs)
@@ -968,8 +1113,10 @@ class ColbertPRF(TransformerBase):
         for qid, res in it:
             new_query_df = self.transform_query(res)     
             if self.return_docs:
-                new_query_df = res[["qid", "docno", "docid"]].merge(new_query_df, on=["qid"])
-                
+                return_doc_rows = ["qid", "docno", "docid"]
+                if 'doc_embs' in topics_and_docs.columns:
+                    return_doc_rows.append('doc_embs')
+                new_query_df = res[return_doc_rows].merge(new_query_df, on=["qid"])                
                 new_query_df = new_query_df.rename(columns={'docno_x':'docno'})
             rtr.append(new_query_df)
         return pd.concat(rtr)

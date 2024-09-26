@@ -14,7 +14,7 @@ import queue
 import math
 from colbert.utils.parser import Arguments
 import colbert.utils.distributed as distributed
-
+from warnings import warn
 from colbert.utils.utils import create_directory
 
 import os
@@ -79,7 +79,8 @@ class CollectionEncoder():
 
     def _load_model(self):
         self.colbert, self.checkpoint = load_colbert(self.args, do_print=(self.process_idx == 0))
-        self.colbert = self.colbert.cuda()
+        if not colbert.parameters.DEVICE == torch.device("cpu"):
+            self.colbert = self.colbert.cuda()
         self.colbert.eval()
 
         self.inference = ModelInference(self.colbert, amp=self.args.amp)
@@ -252,7 +253,7 @@ class CollectionEncoder_Generator(CollectionEncoder):
 
 
 class ColBERTIndexer(IterDictIndexerBase):
-    def __init__(self, checkpoint, index_root, index_name, chunksize, prepend_title=False, num_docs=None, ids=True, faiss=True):
+    def __init__(self, checkpoint, index_root, index_name, chunksize, prepend_title=False, num_docs=None, ids=True, faiss=True, gpu=True):
         args = Object()
         args.similarity = 'cosine'
         args.dim = 128
@@ -280,6 +281,14 @@ class ColBERTIndexer(IterDictIndexerBase):
         self.prepend_title = prepend_title
         self.num_docs = num_docs
         self.faiss = faiss
+        self.gpu = gpu
+        
+        if not gpu:
+            warn("Gpu disabled, YMMV")
+            import colbert.parameters
+            import colbert.evaluation.load_model
+            import colbert.modeling.colbert
+            colbert.parameters.DEVICE = colbert.evaluation.load_model.DEVICE = colbert.modeling.colbert.DEVICE = torch.device("cpu")
 
         assert self.args.slices >= 1
         assert self.args.sample is None or (0.0 < self.args.sample <1.0), self.args.sample
@@ -290,14 +299,14 @@ class ColBERTIndexer(IterDictIndexerBase):
             self.args.index_root,
             self.args.index_name,
             self.args.partitions,
-            memtype
+            memtype, gpu=self.gpu
         )
 
     def index(self, iterator):
         from timeit import default_timer as timer
         starttime = timer()
         maxdocs = 100
-        assert not os.path.exists(self.args.index_path), self.args.index_path
+        #assert not os.path.exists(self.args.index_path), self.args.index_path
         docnos=[]
         docid=0
         def convert_gen(iterator):
